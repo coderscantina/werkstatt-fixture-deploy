@@ -1,0 +1,73 @@
+name: deploy
+
+on: [deployment]
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.deployment.environment }}
+    steps:
+      - name: Report the deployment inputs
+        run: |
+          echo "deployment_id=${{ github.event.deployment.id }}"
+          echo "sha=${{ github.event.deployment.sha }}"
+          echo "environment=${{ github.event.deployment.environment }}"
+          echo "ref=${{ github.event.deployment.ref }}"
+          echo "payload=${{ toJSON(github.event.deployment.payload) }}"
+
+      - name: Check out the deployment's exact commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.deployment.sha }}
+
+      - name: Confirm the checked out commit
+        run: |
+          echo "checked_out_sha=$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD)" = "${{ github.event.deployment.sha }}"
+
+      - name: Report in_progress
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: context.payload.deployment.id,
+              state: 'in_progress',
+              description: 'Deploying ' + context.payload.deployment.sha.slice(0, 7),
+              log_url: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+            });
+
+      - name: Deploy
+        run: echo "Serving public/index.html for environment ${{ github.event.deployment.environment }}"
+
+      - name: Report success
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: context.payload.deployment.id,
+              state: 'success',
+              environment_url: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}`,
+              log_url: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+            });
+
+      - name: Report failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: context.payload.deployment.id,
+              state: 'failure',
+              log_url: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+            });
